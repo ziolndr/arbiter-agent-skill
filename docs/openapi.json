@@ -1,0 +1,110 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ARBITER integration reference",
+    "version": "1.0.0",
+    "description": "Operator-described request contracts. Exact response envelopes must be read from the live service. API routes may require x402 payment."
+  },
+  "servers": [
+    {
+      "url": "https://api.grip.fyi"
+    }
+  ],
+  "paths": {
+    "/v1/compare": {
+      "post": {
+        "summary": "Measure coherence of one complete candidate set",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "query",
+                  "candidates"
+                ],
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "top_k": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "use_freq": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked coherence output with top/all fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "top": {},
+                    "all": {}
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment challenge; explicit payer authorization required"
+          }
+        }
+      }
+    },
+    "/v1/embed": {
+      "post": {
+        "summary": "Compute embeddings for supplied texts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "texts"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                  "texts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Embedding results; preserve actual live envelope"
+          },
+          "402": {
+            "description": "Payment challenge; explicit payer authorization required"
+          }
+        }
+      }
+    }
+  }
+}

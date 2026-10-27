@@ -1,0 +1,6 @@
+# ARBITER Agent Skill
+
+https://ziolndr.github.io/arbiter-agent-skill/skills/arbiter/SKILL.md
+https://ziolndr.github.io/arbiter-agent-skill/skills/arbiter/references/API.md
+https://ziolndr.github.io/arbiter-agent-skill/skills/arbiter/references/MCP.md
+MCP https://api.grip.fyi/mcp

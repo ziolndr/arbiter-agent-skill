@@ -1,0 +1,33 @@
+{
+  "skills": [
+    {
+      "name": "arbiter",
+      "version": "1.0.0",
+      "description": "Deterministic coherence ranking and text embeddings for agents.",
+      "publisher": "Actual General Intelligence, Inc.",
+      "skill_url": "https://ziolndr.github.io/arbiter-agent-skill/skills/arbiter/SKILL.md",
+      "skill_format": "https://agentskills.io/specification",
+      "mcp": {
+        "transport": "streamable-http",
+        "url": "https://api.grip.fyi/mcp",
+        "tools": [
+          "arbiter_compare",
+          "arbiter_embed"
+        ]
+      },
+      "rest": {
+        "compare": "https://api.grip.fyi/v1/compare",
+        "embed": "https://api.grip.fyi/v1/embed"
+      },
+      "billing": {
+        "scheme": "x402",
+        "check_current_terms": true,
+        "requires_explicit_payment_authorization": true
+      }
+    }
+  ],
+  "tools": [
+    "arbiter_compare",
+    "arbiter_embed"
+  ]
+}
