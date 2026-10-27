@@ -1,0 +1,11 @@
+{
+  "query": "Role: incident commander. State: production API errors rose after deployment. Constraints: preserve customer data and minimize downtime. Disruption: elevated 5xx responses in one region. Objective: choose the most fitting immediate response.",
+  "candidates": [
+    "Rollback the latest deployment",
+    "Disable the newly released feature flag",
+    "Collect another hour of telemetry without changes",
+    "Escalate to the on-call engineering lead"
+  ],
+  "top_k": 4,
+  "use_freq": true
+}
