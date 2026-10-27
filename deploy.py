@@ -29,6 +29,7 @@ SERVER_LABEL = 'fyi.grip.arbiter.agent-skill.web'
 TUNNEL_LABEL = 'fyi.grip.arbiter.agent-skill.tunnel'
 TUNNEL_NAME = 'arbiter-agent-skill-grip'
 GITHUB_REPO = 'arbiter-agent-skill'
+RELEASE_VERSION = '1.2.0'
 
 
 def run(cmd, timeout=40, cwd=None):
@@ -191,22 +192,101 @@ def discover_tunnel_credentials(tunnel_id):
     return None
 
 
-def verify_public_skill(host, attempts=6):
-    url = f'https://{host}/skills/arbiter/SKILL.md'
-    for _ in range(attempts):
+def public_probe(url, timeout=5):
+    """Check actual public route with response classification and bounded diagnostics."""
+    request = urllib.request.Request(url, headers={
+        'User-Agent': 'ARBITER-skill-verifier/1.2',
+        'Accept': 'text/plain, text/markdown, */*'
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read(8192)
+            if response.status == 200 and b'name: arbiter' in body and b'---' in body:
+                return True, 'HTTP 200 (ARBITER skill content confirmed)'
+            return False, 'HTTP ' + str(response.status) + ' (unexpected document)'
+    except urllib.error.HTTPError as exc:
+        body = exc.read(2048).decode('utf-8', 'replace')
+        import re
+        match = re.search(r'(?:Error\s*|error code[:\s]*)(10[0-9]{2}|5[0-9]{2})', body, flags=re.I)
+        suffix = (' / Cloudflare ' + match.group(1)) if match else ''
+        return False, f'HTTP {exc.code}{suffix}'
+    except urllib.error.URLError as exc:
+        return False, 'network/DNS/TLS: ' + str(exc.reason)[:130]
+    except (TimeoutError, OSError) as exc:
+        return False, type(exc).__name__ + ': ' + str(exc)[:130]
+
+
+def launchd_summary(label):
+    check = run(['launchctl', 'print', f'gui/{os.getuid()}/{label}'], timeout=8)
+    if check.returncode:
+        return 'service not running under user launchd'
+    import re
+    pid = re.search(r'^\s*pid = (\d+)', check.stdout, re.M)
+    state = re.search(r'^\s*state = ([^\n]+)', check.stdout, re.M)
+    return f'state={state.group(1).strip() if state else "unknown"}; pid={pid.group(1) if pid else "none"}'
+
+
+def tunnel_diagnostics(cloudflared, tunnel, label=TUNNEL_LABEL):
+    note('Tunnel status', launchd_summary(label))
+    info = run([cloudflared, 'tunnel', 'info', tunnel], timeout=16)
+    if info.returncode:
+        note('Tunnel network', 'info unavailable: ' + (info.stderr or info.stdout).strip()[-180:])
+    else:
+        lines = info.stdout.splitlines()
+        connected = [line for line in lines if 'conn' in line.lower() or 'edge' in line.lower()]
+        note('Tunnel network', ('; '.join(connected) if connected else 'tunnel info returned successfully')[:240])
+    logfile = LOGS / (label + '.err.log')
+    if logfile.is_file():
+        # Log output is limited and kept on the owner's Mac; never published to GitHub.
         try:
-            request = urllib.request.Request(url, headers={'User-Agent': 'ARBITER-skill-verify/1.1'})
-            with urllib.request.urlopen(request, timeout=6) as response:
-                body = response.read(4096)
-                if response.status == 200 and b'name: arbiter' in body:
-                    note('Public HTTPS', 'VERIFIED ' + url)
-                    return True
-        except (urllib.error.URLError, OSError, TimeoutError):
+            tail = logfile.read_text(errors='replace')[-10000:]
+            signals = [line.strip() for line in tail.splitlines()
+                       if any(term in line.lower() for term in
+                              ('err ', 'error=', 'failed', 'registered tunnel', 'reconnecting', 'quic'))]
+            if signals:
+                note('Tunnel log', signals[-1][-260:])
+        except OSError:
             pass
-        if attempts > 1:
-            time.sleep(1)
-    note('Public HTTPS', 'not verified: ' + url)
+
+
+def verify_public_skill(host, cloudflared=None, tunnel=None, wait_seconds=95):
+    """Allow connector registration and DNS propagation; inspect cause if still failing."""
+    url = f'https://{host}/skills/arbiter/SKILL.md'
+    deadline = time.monotonic() + wait_seconds
+    previous = None
+    attempt = 0
+    while True:
+        attempt += 1
+        ok, detail = public_probe(url)
+        if ok:
+            note('Public HTTPS', 'VERIFIED ' + url)
+            note('HTTP check', detail)
+            return True
+        if detail != previous:
+            note('HTTP check', detail + f' (attempt {attempt})')
+            previous = detail
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(min(4, max(0, deadline - time.monotonic())))
+    note('Public HTTPS', 'NOT VERIFIED ' + url)
+    if cloudflared and tunnel:
+        tunnel_diagnostics(cloudflared, tunnel)
+    note('Recovery', 'No manual login attempted; existing service and repository preserved')
     return False
+
+
+def _ingress_validate(cloudflared, config, host):
+    result = run([cloudflared, 'tunnel', '--config', str(config), 'ingress', 'validate'], timeout=12)
+    if result.returncode:
+        note('Ingress config', 'invalid: ' + (result.stderr or result.stdout).strip()[-220:])
+        return False
+    rule = run([cloudflared, 'tunnel', '--config', str(config),
+                'ingress', 'rule', 'https://' + host + '/skills/arbiter/SKILL.md'], timeout=12)
+    if rule.returncode or f'127.0.0.1:{PORT}' not in (rule.stdout + rule.stderr):
+        note('Ingress config', 'route did not confirm origin localhost:' + str(PORT))
+        return False
+    note('Ingress config', 'validated ' + host + ' -> localhost:' + str(PORT))
+    return True
 
 
 def setup_cloudflare(host):
@@ -225,22 +305,24 @@ def setup_cloudflare(host):
     config = RUNTIME / 'tunnel.yml'
     # A dedicated tunnel for documentation: no writes to pre-existing tunnels or ingress.
     config.write_text(f'tunnel: {tunnel}\ncredentials-file: "{creds}"\ningress:\n  - hostname: {host}\n    service: http://127.0.0.1:{PORT}\n  - service: http_status:404\n')
+    if not _ingress_validate(cloudflared, config, host):
+        return False
     dns = run([cloudflared, 'tunnel', 'route', 'dns', tunnel, host], timeout=40)
-    dns_present = (dns.returncode == 0)
-    if not dns_present:
+    if dns.returncode:
         msg = (dns.stderr or dns.stdout).strip()
         if 'already configured' in msg.lower() or 'already exists' in msg.lower():
-            note('Cloudflare', 'Existing DNS record detected; no overwrite; verifying independently')
-            dns_present = True
+            note('Cloudflare', 'Existing hostname DNS record detected; no overwrite')
         else:
             note('Cloudflare', 'DNS route failed: ' + msg[:260])
             return False
-    if dns.returncode == 0:
+    else:
         note('Cloudflare', 'DNS route ensured: ' + host)
     if not make_launch_agent(TUNNEL_LABEL,
-                             [cloudflared, 'tunnel', '--config', str(config), 'run', tunnel]):
+                             [cloudflared, 'tunnel', '--config', str(config), '--protocol', 'http2', 'run', tunnel]):
         return False
-    return verify_public_skill(host)
+    note('Transport', 'http2 (no QUIC retry delay; dedicated skill tunnel only)')
+    note('Tunnel status', launchd_summary(TUNNEL_LABEL))
+    return verify_public_skill(host, cloudflared, tunnel)
 
 
 def _git(commit_dir, *args, timeout=40):
@@ -328,7 +410,7 @@ def setup_github():
         if not changes.stdout.strip() and exists:
             note('GitHub', 'UP TO DATE https://github.com/' + name)
             return True
-        commit = _git(repo, 'commit', '-m', 'Publish ARBITER agent skill release 1.1.0', timeout=25)
+        commit = _git(repo, 'commit', '-m', 'Publish ARBITER agent skill release 1.2.0', timeout=25)
         if commit.returncode:
             note('GitHub', 'BLOCKED: git commit failed: ' + commit.stderr.strip()[:190])
             return False
@@ -362,7 +444,7 @@ def main():
     args = parser.parse_args()
     if not args.host.endswith('.grip.fyi') or any(ch for ch in args.host if ch not in 'abcdefghijklmnopqrstuvwxyz0123456789-.'):
         parser.error('host must be a simple *.grip.fyi DNS hostname')
-    print('\nARBITER / AGENT SKILL / RELEASE 1.1.0 / UNATTENDED\n')
+    print('\nARBITER / AGENT SKILL / RELEASE 1.2.0 / UNATTENDED\n')
     check = run([sys.executable, str(SOURCE / 'scripts/validate_release.py')])
     if check.returncode:
         print(check.stdout, check.stderr)

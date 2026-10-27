@@ -50,3 +50,7 @@ Hosting separately avoids modifying ARBITER's existing public API server. The on
 Jev-style Choice/Score/Noul returns typed values with calibrated probabilities. ARBITER measures coherence of candidates against context and returns rankings/scores; its outputs are neither probabilities nor generated reasoning. Different contract, different skill.
 
 **Owner:** Actual General Intelligence, Inc. • **License:** MIT
+
+## Release 1.2.0 HTTPS recovery
+
+A user LaunchAgent being loaded does **not** prove that its Cloudflare connector has registered or that DNS and HTTPS are reachable. Deployment checks the dedicated tunnel's ingress rule, forces HTTP/2 transport on the *skill-only* connector to avoid potentially lengthy QUIC fallback, and polls the public skill document for up to 95 seconds. Failed public checks show the status code, tunnel health, and bounded local log signals. No interactive Cloudflare or GitHub step is involved. Rerun the `.command` installer to repair only the managed skill components; unrelated tunnels and the ARBITER engine remain unchanged.

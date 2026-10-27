@@ -127,6 +127,71 @@ class TestDeploymentUnattended(unittest.TestCase):
             with mock.patch.object(self.deploy, 'HOME', Path(home)):
                 self.assertIsNone(self.deploy.discover_tunnel_credentials('11111111-2222-3333-4444-555555555555'))
 
+    def test_public_probe_recognizes_only_real_skill_content(self):
+        class FakeResponse:
+            status = 200
+            def __init__(self, body): self.body = body
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, limit): return self.body[:limit]
+        with mock.patch.object(self.deploy.urllib.request, 'urlopen', return_value=FakeResponse(b'---\nname: arbiter\n---')):
+            ok, detail = self.deploy.public_probe('https://arbiter-skill.grip.fyi/skills/arbiter/SKILL.md')
+            self.assertTrue(ok, detail)
+        with mock.patch.object(self.deploy.urllib.request, 'urlopen', return_value=FakeResponse(b'<html>Cloudflare Access</html>')):
+            ok, detail = self.deploy.public_probe('https://arbiter-skill.grip.fyi/skills/arbiter/SKILL.md')
+            self.assertFalse(ok)
+            self.assertIn('unexpected', detail)
+
+    def test_public_probe_reports_cloudflare_http_error(self):
+        from urllib.error import HTTPError
+        import io
+        err = HTTPError('https://arbiter-skill.grip.fyi', 530, 'gateway', {}, io.BytesIO(b'Error 1033 tunnel down'))
+        with mock.patch.object(self.deploy.urllib.request, 'urlopen', side_effect=err):
+            ok, detail = self.deploy.public_probe('https://arbiter-skill.grip.fyi/skills/arbiter/SKILL.md')
+            self.assertFalse(ok)
+            self.assertIn('1033', detail)
+
+    def test_public_retry_after_delayed_connect(self):
+        with mock.patch.object(self.deploy, 'public_probe', side_effect=[(False, 'HTTP 530'),
+                                                                            (False, 'HTTP 530'),
+                                                                            (True, 'HTTP 200')]):
+            with mock.patch.object(self.deploy.time, 'monotonic', side_effect=[0, 0, 1, 1, 2]):
+                with mock.patch.object(self.deploy.time, 'sleep'):
+                    self.assertTrue(self.deploy.verify_public_skill('arbiter-skill.grip.fyi', wait_seconds=5))
+
+    def test_ingress_command_targets_dedicated_local_origin(self):
+        calls = []
+        def fake_run(cmd, timeout=0):
+            calls.append(cmd)
+            out = 'service: http://127.0.0.1:9433' if 'rule' in cmd else 'OK'
+            return subprocess.CompletedProcess(cmd, 0, out, '')
+        with mock.patch.object(self.deploy, 'run', side_effect=fake_run):
+            self.assertTrue(self.deploy._ingress_validate('/usr/local/bin/cloudflared', Path('/tmp/tunnel.yml'), 'arbiter-skill.grip.fyi'))
+        self.assertEqual(calls[0][-2:], ['ingress', 'validate'])
+        self.assertEqual(calls[1][-2:], ['rule', 'https://arbiter-skill.grip.fyi/skills/arbiter/SKILL.md'])
+
+    def test_tunnel_boot_uses_http2_and_no_login(self):
+        tunnel_commands = []
+        def fake_run(cmd, timeout=0):
+            return subprocess.CompletedProcess(cmd, 0, '', '')
+        def fake_agent(label, cmd, environ=None):
+            tunnel_commands.append(cmd)
+            return True
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with mock.patch.object(self.deploy, 'RUNTIME', root), \
+                 mock.patch.object(self.deploy, 'tunnel_uuid', return_value=('12345', True)), \
+                 mock.patch.object(self.deploy, 'discover_tunnel_credentials', return_value=root/'12345.json'), \
+                 mock.patch.object(self.deploy, '_ingress_validate', return_value=True), \
+                 mock.patch.object(self.deploy, 'make_launch_agent', side_effect=fake_agent), \
+                 mock.patch.object(self.deploy, 'launchd_summary', return_value='loaded'), \
+                 mock.patch.object(self.deploy, 'verify_public_skill', return_value=True), \
+                 mock.patch.object(self.deploy.shutil, 'which', return_value='/bin/cloudflared'), \
+                 mock.patch.object(self.deploy, 'run', side_effect=fake_run):
+                self.assertTrue(self.deploy.setup_cloudflare('arbiter-skill.grip.fyi'))
+        self.assertIn('--protocol', tunnel_commands[0])
+        self.assertIn('http2', tunnel_commands[0])
+
     def test_git_stage_excludes_cloudflare_credentials(self):
         with tempfile.TemporaryDirectory() as home:
             root = Path(home) / 'installed'
