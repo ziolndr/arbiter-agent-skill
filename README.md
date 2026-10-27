@@ -4,10 +4,20 @@
 
 This repository publishes a portable Agent Skill that tells MCP/HTTP-capable agents **when and how** to use the existing ARBITER engine. This is not a new model or a replacement for its current MCP registration, and it never patches the engine.
 
+## Verified public distribution
+
+- **Canonical public skill:** [https://ziolndr.github.io/arbiter-agent-skill/skills/arbiter/SKILL.md](https://ziolndr.github.io/arbiter-agent-skill/skills/arbiter/SKILL.md)
+- **GitHub source:** [github.com/ziolndr/arbiter-agent-skill](https://github.com/ziolndr/arbiter-agent-skill)
+- **Raw skill:** [https://raw.githubusercontent.com/ziolndr/arbiter-agent-skill/main/skills/arbiter/SKILL.md](https://raw.githubusercontent.com/ziolndr/arbiter-agent-skill/main/skills/arbiter/SKILL.md)
+- **Agent Skills install:** `npx skills add ziolndr/arbiter-agent-skill --skill arbiter -g`
+- **MCP:** `https://api.grip.fyi/mcp`
+
+GitHub Pages is the public documentation host. The optional `arbiter-skill.grip.fyi` alias is not required for agent installation or MCP operation.
+
 ## Install from GitHub after publishing
 
 ```bash
-npx skills add <GitHub owner>/arbiter-agent-skill --skill arbiter -g
+npx skills add ziolndr/arbiter-agent-skill --skill arbiter -g
 ```
 
 Or install the directory `skills/arbiter/` into `.agents/skills/arbiter/` (Codex and compatible clients) or `.claude/skills/arbiter/` (Claude Code). See [SKILL.md](skills/arbiter/SKILL.md).
@@ -30,7 +40,7 @@ python3 skills/arbiter/scripts/arbiter_client.py compare --file skills/arbiter/e
 
 No billing occurs in tests or validation. A 402 from REST is an expected payment challenge, not a missing route. Public API terms may change; inspect live x402 terms and obtain authorization before payment.
 
-## Public documentation host
+## Documentation endpoints
 
 The optional standalone documentation service (`site.py`) publishes:
 
@@ -50,7 +60,3 @@ Hosting separately avoids modifying ARBITER's existing public API server. The on
 Jev-style Choice/Score/Noul returns typed values with calibrated probabilities. ARBITER measures coherence of candidates against context and returns rankings/scores; its outputs are neither probabilities nor generated reasoning. Different contract, different skill.
 
 **Owner:** Actual General Intelligence, Inc. • **License:** MIT
-
-## Release 1.2.0 HTTPS recovery
-
-A user LaunchAgent being loaded does **not** prove that its Cloudflare connector has registered or that DNS and HTTPS are reachable. Deployment checks the dedicated tunnel's ingress rule, forces HTTP/2 transport on the *skill-only* connector to avoid potentially lengthy QUIC fallback, and polls the public skill document for up to 95 seconds. Failed public checks show the status code, tunnel health, and bounded local log signals. No interactive Cloudflare or GitHub step is involved. Rerun the `.command` installer to repair only the managed skill components; unrelated tunnels and the ARBITER engine remain unchanged.
